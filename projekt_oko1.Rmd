@@ -1,5 +1,458 @@
 ---
-title: "projekt_oko1"
+title: "A SOE-súly és magán beruházási ráta kapcsolata"
+author: "Papp Mátyás"
+date: "2025-11-30"
 output: html_document
 ---
+
+### GitHub setup
+```{r}
+# library(usethis)
+# # 1) Git inicializálása
+# use_git() 
+# # 2) Repository feltöltése GitHubra
+# use_github()
+```
+
+### Könyvtárak
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(car)         # VIF
+library(broom)
+library(data.table)
+library(tidyverse)
+library(scales)
+library(xtable)
+library(modelsummary)
+library(modeldata)
+library(ggthemes)
+library(ggrepel)
+library(stargazer)
+library(svglite)
+library(showtext)
+library(sysfonts)
+```
+
+
+### Adatok beolvasása
+```{r}
+master_szarcez <- read.csv("D:/Rajk/III/III. Öko I/project/analysis/data/clean_data/master_szarcez_rt70.csv", header = TRUE, stringsAsFactors = FALSE, na.strings = c("", "NA")
+)
+
+# str(master_szarcez)
+# head(master_szarcez)
+```
+
+### LM1 - Alapmodell
+```{r}
+# 1. Kvadratikus tag létrehozása
+master_szarcez$soe50_ta_sq <- master_szarcez$soe50_ta_percentofcampanies^2
+
+# 2. Kvadratikus OLS modell becslése
+lm1 <- lm(
+  gfcf_private_percentofgdp ~ soe50_ta_percentofcampanies + soe50_ta_sq,
+  data = master_szarcez
+)
+
+# Eredmények áttekintése
+summary(lm1)
+
+# 3. Scatter plot kvadratikus illesztett görbével
+library(ggplot2)
+
+ggplot(master_szarcez,
+       aes(x = soe50_ta_percentofcampanies,
+           y = gfcf_private_percentofgdp
+           )) +
+  geom_point() +
+  stat_smooth(
+    method  = "lm",
+    formula = y ~ x + I(x^2),
+    se      = FALSE
+  ) +
+  labs(
+    x = "SOE-arány a mérlegfőösszeg mutató szerint (%)",
+    y = "Magánberuházási ráta (magán GFCF / GDP (%))",
+    title = "A SOE-súly és a magánberuházási ráta kapcsolata"
+  ) +
+  theme_bw(base_family = "Times New Roman")
+```
+
+### LM2 és LM3 - Kontroll változók hozzáadása, SOE50 és SOE25 összehasonlítása (Total Assests)
+```{r}
+# Log GDP per capita képzése
+# Log GDP per capita képzése
+master_szarcez$log_gdp_ppp_percapita <- log(master_szarcez$gdp_ppp_percapita)
+
+lm1.5_soe50 <- lm(
+  gfcf_private_percentofgdp ~
+    soe50_ta_percentofcampanies +
+    soe50_ta_sq +
+    log_gdp_ppp_percapita +
+    real_gdp_growth +
+    private_credit_percentofgdp +
+    wgi +
+    gfcf_public_imf +
+    trade_gdp +
+    member_eu,
+  data = master_szarcez
+)
+
+summary(lm1.5_soe50)
+
+lm2_soe50 <- lm(
+  gfcf_private_percentofgdp ~
+    soe50_ta_percentofcampanies +
+    soe50_ta_sq +
+    log_gdp_ppp_percapita +
+    real_gdp_growth +
+    private_credit_percentofgdp,
+  data = master_szarcez
+)
+
+summary(lm2_soe50)
+
+
+# 5. lm2 eredményének ábrázolása ggplottal
+# A pontok a tényleges megfigyelt értékeket mutatják,
+# a görbe az lm2 modell által becsült kvadratikus kapcsolatot,
+# miközben a kontrollváltozókat a mintabeli átlagukon tartjuk.
+
+# Predikciós grid létrehozása: SOE-arány végigfut a tartományán,
+# a kontrollváltozók átlagos értéken vannak.
+
+grid_soe50 <- with(master_szarcez, data.frame(
+  soe50_ta_percentofcampanies = seq(
+    min(soe50_ta_percentofcampanies, na.rm = TRUE),
+    max(soe50_ta_percentofcampanies, na.rm = TRUE),
+    length.out = 100
+  ),
+  soe50_ta_sq = NA,
+  log_gdp_ppp_percapita = mean(log_gdp_ppp_percapita, na.rm = TRUE),
+  real_gdp_growth = mean(real_gdp_growth, na.rm = TRUE),
+  private_credit_percentofgdp = mean(private_credit_percentofgdp, na.rm = TRUE)
+))
+
+# Kvadratikus tag kiszámítása a gridben
+grid_soe50$soe50_ta_sq <- grid_soe50$soe50_ta_percentofcampanies^2
+
+# lm2 modellből predikált értékek
+grid_soe50$gfcf_pred_soe50 <- predict(lm2_soe50, newdata = grid_soe50)
+
+# Ábra: megfigyelések + lm2_soe50 által becsült görbe
+
+# (Ezt a blokkot később kombináljuk a SOE25-ös görbével.)
+
+
+# 6. Ugyanaz a kvadratikus modell SOE25-re
+# Kvadratikus tag létrehozása SOE25 esetén
+master_szarcez$soe25_ta_sq <- master_szarcez$soe25_ta_percentofcampanies^2
+
+lm3_soe25 <- lm(
+  gfcf_private_percentofgdp ~
+    soe25_ta_percentofcampanies +
+    soe25_ta_sq +
+    log_gdp_ppp_percapita +
+    real_gdp_growth +
+    private_credit_percentofgdp,
+  data = master_szarcez
+)
+
+summary(lm3_soe25)
+
+# Közös ábra: megfigyelések + SOE50 és SOE25 kvadratikus görbéi
+
+# Predikciós grid SOE25-re
+grid_soe25 <- with(master_szarcez, data.frame(
+  soe25_ta_percentofcampanies = seq(
+    min(soe25_ta_percentofcampanies, na.rm = TRUE),
+    max(soe25_ta_percentofcampanies, na.rm = TRUE),
+    length.out = 100
+  ),
+  soe25_ta_sq = NA,
+  log_gdp_ppp_percapita = mean(log_gdp_ppp_percapita, na.rm = TRUE),
+  real_gdp_growth = mean(real_gdp_growth, na.rm = TRUE),
+  private_credit_percentofgdp = mean(private_credit_percentofgdp, na.rm = TRUE)
+))
+
+# Kvadratikus tag kiszámítása a SOE25 gridben
+grid_soe25$soe25_ta_sq <- grid_soe25$soe25_ta_percentofcampanies^2
+
+# lm3_soe25 modellből predikált értékek
+grid_soe25$gfcf_pred_soe25 <- predict(lm3_soe25, newdata = grid_soe25)
+
+# Közös ábra: megfigyelések + SOE50 és SOE25 kvadratikus görbéi
+
+library(ggplot2)
+
+ggplot() +
+  geom_point(
+    data = master_szarcez,
+    aes(x = soe50_ta_percentofcampanies,
+        y = gfcf_private_percentofgdp,
+        color = factor(member_eu)),
+    alpha = 0.7,
+    size = 2.5
+  ) +
+  geom_text(
+    data = master_szarcez,
+    aes(x = soe50_ta_percentofcampanies,
+        y = gfcf_private_percentofgdp,
+        label = country_id,
+        color = factor(member_eu)),
+    vjust = -1,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  geom_line(
+    data = grid_soe50,
+    aes(x = soe50_ta_percentofcampanies,
+        y = gfcf_pred_soe50,
+        linetype = ">50% állami tulajdon (LM2)"),
+    linewidth = 0.6,
+    alpha = 0.8
+  ) +
+  geom_line(
+    data = grid_soe25,
+    aes(x = soe25_ta_percentofcampanies,
+        y = gfcf_pred_soe25,
+        linetype = ">25% állami tulajdon (LM3)"),
+    linewidth = 0.5
+  ) +
+  scale_linetype_manual(
+    name = "Tulajdonosi küszöbérték",
+    values = c(">50% állami tulajdon (LM2)" = "solid", ">25% állami tulajdon (LM3)" = "dashed")
+  ) +
+  scale_color_manual(
+    name = "EU tagság",
+    values = c("0" = "black", "1" = "blue"),
+    labels = c("0" = "Nem EU-tag", "1" = "EU-tag")
+  ) +
+  labs(
+    x = "SOE-arány a mérlegfőösszeg mutató szerint (%)",
+    y = "Magánberuházási ráta (magán GFCF / GDP (%))",
+    title = "A mérlegfőösszeg szerinti SOE-arány és a magánberuházási ráta kapcsolata"
+  ) +
+  theme_bw(base_family = "Times New Roman")
+```
+
+### LM1, LM1.5, LM2 és LM3 - Regressziós táblázat
+```{r stargazer-results, results='asis', echo=FALSE}
+cat("<style>
+table {
+  font-family: 'Times New Roman', 'Times', serif;
+  font-size: 12pt;
+}
+</style>")
+
+### Regressziós eredmények – LM1, LM2 (SOE50), LM3 (SOE25)
+stargazer::stargazer(
+  lm1,
+  lm1.5_soe50,
+  lm2_soe50,
+  lm3_soe25,
+  type           = "html",
+  title          = "Az állami vállalatok súlya és a magánberuházási ráta kapcsolata",
+  column.labels  = c(
+    "LM1: Alapmodell",
+    "LM1.5: Teljes kontrollkészlet",
+    "LM2: Szűkített kontrollkészlet",
+    "LM3: SOE25 + kontrollok"
+  ),
+  dep.var.labels = "Magán beruházási ráta (magán GFCF / GDP, %)",
+  covariate.labels = c(
+    "SOE50-arány (TA, %)",
+    "SOE50-arány négyzete",
+    "SOE25-arány (TA, %)",
+    "SOE25-arány négyzete",
+    "log GDP/fő (PPP)",
+    "Reál GDP-növekedés (%)",
+    "Magán hitelállomány / GDP (%)",
+    "Intézményi minőség (WGI)",
+    "Állami beruházási ráta / GDP (%)",
+    "Külkereskedelmi nyitottság (%)",
+    "EU-tagság (dummy)"
+  ),
+  digits         = 3,
+  no.space       = TRUE,
+  align          = TRUE,
+  header         = FALSE,
+  notes          = "Zárójelben a standard hibák; N = 30 ország, 2012–2016-os átlagolt adatok.",
+  out            = "regresszios_output_LM1_1.5_2_3.html"
+)
+```
+
+
+### LM4 és LM5 - Az 50 és 25 százalékos tulajdon összehasonlítása az árbevétel tekintetében
+```{r}
+## Kvadratikus modell SOE50_OT és SOE25_OT változókra
+
+# Ha az SOE_OT változók nem numerikusak, alakítsuk őket át.
+# Ez a blokk csak akkor csinál bármit, ha tényleg nem numeric a típusuk.
+
+if (!is.numeric(master_szarcez$soe50_ot_percentofcampanies)) {
+  master_szarcez$soe50_ot_percentofcampanies <-
+    as.numeric(as.character(master_szarcez$soe50_ot_percentofcampanies))
+}
+
+if (!is.numeric(master_szarcez$soe25_ot_percentofcampanies)) {
+  master_szarcez$soe25_ot_percentofcampanies <-
+    as.numeric(as.character(master_szarcez$soe25_ot_percentofcampanies))
+}
+
+# Kvadratikus tagek létrehozása az "ot" mutatókra
+master_szarcez$soe50_ot_sq <- master_szarcez$soe50_ot_percentofcampanies^2
+master_szarcez$soe25_ot_sq <- master_szarcez$soe25_ot_percentofcampanies^2
+
+# Kvadratikus OLS modell SOE50_OT-re
+lm4_soe50_ot <- lm(
+  gfcf_private_percentofgdp ~
+    soe50_ot_percentofcampanies +
+    soe50_ot_sq +
+    log_gdp_ppp_percapita +
+    real_gdp_growth +
+    private_credit_percentofgdp,
+  data = master_szarcez
+)
+
+summary(lm4_soe50_ot)
+
+# Kvadratikus OLS modell SOE25_OT-re
+lm5_soe25_ot <- lm(
+  gfcf_private_percentofgdp ~
+    soe25_ot_percentofcampanies +
+    soe25_ot_sq +
+    log_gdp_ppp_percapita +
+    real_gdp_growth +
+    private_credit_percentofgdp,
+  data = master_szarcez
+)
+
+summary(lm5_soe25_ot)
+
+# Predikciós grid SOE50_OT-re
+grid_soe50_ot <- with(master_szarcez, data.frame(
+  soe50_ot_percentofcampanies = seq(
+    min(soe50_ot_percentofcampanies, na.rm = TRUE),
+    max(soe50_ot_percentofcampanies, na.rm = TRUE),
+    length.out = 100
+  ),
+  soe50_ot_sq = NA,
+  log_gdp_ppp_percapita = mean(log_gdp_ppp_percapita, na.rm = TRUE),
+  real_gdp_growth = mean(real_gdp_growth, na.rm = TRUE),
+  private_credit_percentofgdp = mean(private_credit_percentofgdp, na.rm = TRUE)
+))
+grid_soe50_ot$soe50_ot_sq <- grid_soe50_ot$soe50_ot_percentofcampanies^2
+grid_soe50_ot$gfcf_pred_soe50_ot <- predict(lm4_soe50_ot, newdata = grid_soe50_ot)
+
+# Predikciós grid SOE25_OT-re
+grid_soe25_ot <- with(master_szarcez, data.frame(
+  soe25_ot_percentofcampanies = seq(
+    min(soe25_ot_percentofcampanies, na.rm = TRUE),
+    max(soe25_ot_percentofcampanies, na.rm = TRUE),
+    length.out = 100
+  ),
+  soe25_ot_sq = NA,
+  log_gdp_ppp_percapita = mean(log_gdp_ppp_percapita, na.rm = TRUE),
+  real_gdp_growth = mean(real_gdp_growth, na.rm = TRUE),
+  private_credit_percentofgdp = mean(private_credit_percentofgdp, na.rm = TRUE)
+))
+grid_soe25_ot$soe25_ot_sq <- grid_soe25_ot$soe25_ot_percentofcampanies^2
+grid_soe25_ot$gfcf_pred_soe25_ot <- predict(lm5_soe25_ot, newdata = grid_soe25_ot)
+
+# Közös ábra: megfigyelések + SOE50_OT és SOE25_OT kvadratikus görbéi
+
+library(ggplot2)
+
+ggplot() +
+  geom_point(
+    data = master_szarcez,
+    aes(x = soe50_ot_percentofcampanies,
+        y = gfcf_private_percentofgdp,
+        color = factor(member_eu)),
+    alpha = 0.7,
+    size = 2.5
+  ) +
+  geom_text(
+    data = master_szarcez,
+    aes(x = soe50_ot_percentofcampanies,
+        y = gfcf_private_percentofgdp,
+        label = country_id,
+        color = factor(member_eu)),
+    vjust = -1,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  geom_line(
+    data = grid_soe50_ot,
+    aes(x = soe50_ot_percentofcampanies,
+        y = gfcf_pred_soe50_ot,
+        linetype = ">50% állami tulajdon"),
+    linewidth = 0.7
+  ) +
+  geom_line(
+    data = grid_soe25_ot,
+    aes(x = soe25_ot_percentofcampanies,
+        y = gfcf_pred_soe25_ot,
+        linetype = ">25% állami tulajdon"),
+    linewidth = 0.5
+  ) +
+  scale_linetype_manual(
+    name = "Tulajdonosi küszöbérték",
+    values = c(">50% állami tulajdon" = "solid", ">25% állami tulajdon" = "dashed")
+  ) +
+  scale_color_manual(
+    name = "EU tagság",
+    values = c("0" = "black", "1" = "blue"),
+    labels = c("0" = "Nem EU-tag", "1" = "EU-tag")
+  ) +
+  labs(
+    x = "SOE-arány az árbevétel mutató szerint (%)",
+    y = "Magánberuházási ráta (magán GFCF / GDP (%))",
+    title = "Az üzemi eredmény szerinti SOE-arány és a magánberuházási ráta kapcsolata"
+  ) +
+  theme_bw(base_family = "Times New Roman")
+```
+
+
+### LM2, LM3, LM4 és LM5 - Regressziós táblázat
+```{r}
+stargazer::stargazer(
+  lm2_soe50,
+  lm3_soe25,
+  lm4_soe50_ot,
+  lm5_soe25_ot,
+  type           = "html",
+  title          = "Az állami vállalatok súlya és a magánberuházási ráta kapcsolata (mérlegfőösszeg vs. árbevétel)",
+  column.labels  = c(
+    "LM2: SOE50 (TA)",
+    "LM3: SOE25 (TA)",
+    "LM4: SOE50 (OT)",
+    "LM5: SOE25 (OT)"
+  ),
+  dep.var.labels = "Magánberuházási ráta (magán GFCF / GDP, %)",
+  covariate.labels = c(
+    "SOE50-arány (TA, %)",
+    "SOE50-arány négyzete (TA)",
+    "log GDP/fő (PPP)",
+    "Reál GDP-növekedés (%)",
+    "Magán hitelállomány / GDP (%)",
+    "SOE25-arány (TA, %)",
+    "SOE25-arány négyzete (TA)",
+    "SOE50-arány (OT, %)",
+    "SOE50-arány négyzete (OT)",
+    "SOE25-arány (OT, %)",
+    "SOE25-arány négyzete (OT)"
+  ),
+  digits         = 3,
+  no.space       = TRUE,
+  align          = TRUE,
+  header         = FALSE,
+  notes          = "Zárójelben a standard hibák; N = 30 ország, 2012–2016-os átlagolt adatok.",
+  out            = "regresszios_output_LM2_3_4_5.html"
+)
+
+```
 
